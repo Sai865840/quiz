@@ -4,12 +4,12 @@ import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager
 import { getStorage } from 'firebase/storage';
 
 const firebaseConfig = {
-    apiKey: "AIzaSyC_Y5AYNw-qfHRncEuzwOA9d1jReKztInY",
-    authDomain: "neuralprep-e2d1b.firebaseapp.com",
-    projectId: "neuralprep-e2d1b",
-    storageBucket: "neuralprep-e2d1b.firebasestorage.app",
-    messagingSenderId: "740904166312",
-    appId: "1:740904166312:web:ac188708063855b5ec739d"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 const app = initializeApp(firebaseConfig);
