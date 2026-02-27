@@ -23,7 +23,7 @@ import RapidFire from './pages/RapidFire/RapidFire';
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
+      <BrowserRouter basename={import.meta.env.BASE_URL}>
         <ToastContainer />
         <Routes>
           {/* Auth routes (no layout, no protection) */}
