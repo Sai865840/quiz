@@ -5,6 +5,7 @@ import { useDataStore } from '../../store/dataStore';
 import { getGreeting } from '../../utils/helpers';
 import { MOTIVATIONAL_QUOTES } from '../../constants';
 import * as sessionService from '../../firebase/sessionService';
+import * as firestoreService from '../../firebase/firestoreService';
 import ProgressRing from '../../components/ui/ProgressRing';
 
 export default function Dashboard() {
@@ -29,6 +30,13 @@ export default function Dashboard() {
             try {
                 if (subjects.length === 0) await fetchSubjects(user.uid);
                 await fetchPerformance(user.uid);
+
+                // Fetch fresh user profile for accurate streak / today stats
+                const profile = await firestoreService.getUserProfile(user.uid);
+                if (profile) {
+                    useAuthStore.getState().setUserProfile(profile);
+                }
+
                 const sessions = await sessionService.getRecentSessions(user.uid, 5);
                 setRecentSessions(sessions);
             } catch (err) {
@@ -50,21 +58,24 @@ export default function Dashboard() {
         return diff > 0 ? diff : 0;
     }, [userProfile?.examDate]);
 
-    // Today's stats from recent sessions
+    // Today's stats from user profile
     const todayStats = useMemo(() => {
-        const todayStr = new Date().toISOString().split('T')[0];
-        const todaySessions = recentSessions.filter((s) => {
-            if (!s.endTime) return false;
-            const endDate = s.endTime?.toDate ? s.endTime.toDate() : new Date(s.endTime);
-            return endDate.toISOString().split('T')[0] === todayStr;
-        });
+        const now = new Date();
+        const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
 
-        const totalAnswered = todaySessions.reduce((s, ss) => s + (ss.answered || 0), 0);
-        const totalCorrect = todaySessions.reduce((s, ss) => s + (ss.correct || 0), 0);
-        const accuracy = totalAnswered > 0 ? Math.round((totalCorrect / totalAnswered) * 100) : 0;
+        let answered = 0;
+        let correct = 0;
+        let sessions = 0;
 
-        return { sessions: todaySessions.length, answered: totalAnswered, correct: totalCorrect, accuracy };
-    }, [recentSessions]);
+        if (userProfile?.todayStats?.date === todayStr) {
+            answered = userProfile.todayStats.answered || 0;
+            correct = userProfile.todayStats.correct || 0;
+            sessions = userProfile.todayStats.sessions || 0;
+        }
+
+        const accuracy = answered > 0 ? Math.round((correct / answered) * 100) : 0;
+        return { sessions, answered, correct, accuracy };
+    }, [userProfile]);
 
     // Performance-based stats (lightweight — from performanceMap only, no questions fetch)
     const perfStats = useMemo(() => {
@@ -140,32 +151,26 @@ export default function Dashboard() {
     // Daily goal progress
     const goalProgress = Math.min(100, Math.round((todayStats.answered / dailyGoal) * 100));
 
-    // Streak calculation (consecutive days with sessions)
+    // Streak from user profile
     const streak = useMemo(() => {
-        if (recentSessions.length === 0) return 0;
-        let count = 0;
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        if (!userProfile?.streak || !userProfile?.lastSessionDate) return 0;
 
-        for (let d = 0; d < 30; d++) {
-            const checkDate = new Date(today);
-            checkDate.setDate(checkDate.getDate() - d);
-            const checkStr = checkDate.toISOString().split('T')[0];
+        const now = new Date();
+        const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
 
-            const hasSession = recentSessions.some((s) => {
-                if (!s.endTime) return false;
-                const endDate = s.endTime?.toDate ? s.endTime.toDate() : new Date(s.endTime);
-                return endDate.toISOString().split('T')[0] === checkStr;
-            });
+        // If they missed a day, streak is 0 visually (until they complete a session today)
+        const lastDate = new Date(userProfile.lastSessionDate);
+        lastDate.setHours(0, 0, 0, 0);
+        const todayDate = new Date();
+        todayDate.setHours(0, 0, 0, 0);
+        const diffDays = Math.round((todayDate - lastDate) / (1000 * 60 * 60 * 24));
 
-            if (hasSession) {
-                count++;
-            } else if (d > 0) {
-                break; // streak broken
-            }
+        if (diffDays > 1) {
+            return 0; // Streak officially broken, waiting for user to do a session to start new streak
         }
-        return count;
-    }, [recentSessions]);
+
+        return userProfile.streak;
+    }, [userProfile]);
 
     const totalQuestions = subjects.reduce((sum, s) => sum + (s.questionCount || 0), 0);
 

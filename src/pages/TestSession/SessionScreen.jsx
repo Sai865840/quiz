@@ -85,9 +85,11 @@ export default function SessionScreen() {
     // Handle selecting an option
     const handleSelectOption = (label) => {
         setSelectedOption(label);
+        // Save the selection immediately so going back/forth retains it
+        session.answerQuestion(currentQ.id, label, currentQ.correctOption);
+
         if (autoNext) {
-            // Auto save & next
-            session.answerQuestion(currentQ.id, label, currentQ.correctOption);
+            // Auto next
             if (!isLastQuestion) {
                 setTimeout(() => session.nextQuestion(), 150);
             }
@@ -142,6 +144,7 @@ export default function SessionScreen() {
             const result = await session.endSession();
             if (user?.uid && result) {
                 await sessionService.batchUpdatePerformance(user.uid, result.questionResults);
+                await sessionService.updateUserAggregateStats(user.uid, result);
             }
             navigate(`/test/results?session=${result.sessionId}`);
         } catch (err) {

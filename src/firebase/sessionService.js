@@ -1,6 +1,6 @@
 import {
     doc, collection, addDoc, getDoc, getDocs, updateDoc,
-    query, where, orderBy, limit, serverTimestamp, writeBatch,
+    query, where, orderBy, limit, serverTimestamp, writeBatch, runTransaction
 } from 'firebase/firestore';
 import { db } from './config';
 
@@ -39,6 +39,62 @@ export async function completeSession(sessionId, finalData) {
         status: 'completed',
         endTime: serverTimestamp(),
     });
+}
+
+export async function updateUserAggregateStats(uid, sessionResult) {
+    const userRef = doc(db, 'users', uid);
+    try {
+        await runTransaction(db, async (transaction) => {
+            const userDoc = await transaction.get(userRef);
+            if (!userDoc.exists()) return;
+            const data = userDoc.data();
+
+            const now = new Date();
+            // Local timezone date string
+            const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+
+            let { streak = 0, lastSessionDate = null, todayStats = { date: '', answered: 0, correct: 0, sessions: 0 } } = data;
+
+            // Reset todayStats if it's a new day
+            if (todayStats.date !== todayStr) {
+                todayStats = { date: todayStr, answered: 0, correct: 0, sessions: 0 };
+            }
+
+            // Update todayStats
+            todayStats.answered += sessionResult.answered || 0;
+            todayStats.correct += sessionResult.correct || 0;
+            todayStats.sessions += 1;
+
+            // Update streak
+            if (lastSessionDate !== todayStr) {
+                if (lastSessionDate) {
+                    const lastDate = new Date(lastSessionDate);
+                    lastDate.setHours(0, 0, 0, 0);
+                    const todayDate = new Date();
+                    todayDate.setHours(0, 0, 0, 0);
+                    const diffDays = Math.round((todayDate - lastDate) / (1000 * 60 * 60 * 24));
+
+                    if (diffDays === 1) {
+                        streak += 1;
+                    } else if (diffDays > 1) {
+                        streak = 1; // reset streak if missed a day
+                    }
+                } else {
+                    streak = 1;
+                }
+                lastSessionDate = todayStr;
+            }
+
+            transaction.update(userRef, {
+                streak,
+                lastSessionDate,
+                todayStats,
+                updatedAt: serverTimestamp()
+            });
+        });
+    } catch (error) {
+        console.error("Failed to update aggregate stats:", error);
+    }
 }
 
 export async function abandonSession(sessionId) {

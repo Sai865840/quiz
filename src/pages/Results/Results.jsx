@@ -156,13 +156,15 @@ export default function Results() {
                                                 <strong style={{
                                                     color: r.isCorrect ? '#00D9A3' : r.userAnswer === null ? '#FFB347' : '#FF6B6B',
                                                 }}>
-                                                    {r.userAnswer || 'Skipped'}
+                                                    {r.userAnswer || 'Skipped'} {r.userAnswerText && r.userAnswer !== null ? `- ${r.userAnswerText}` : ''}
                                                 </strong>
                                             </div>
                                             {!r.isCorrect && r.userAnswer !== null && (
                                                 <div>
                                                     <span style={{ color: 'var(--muted)' }}>Correct: </span>
-                                                    <strong style={{ color: '#00D9A3' }}>{r.correctAnswer}</strong>
+                                                    <strong style={{ color: '#00D9A3' }}>
+                                                        {r.correctAnswer} {r.correctAnswerText ? `- ${r.correctAnswerText}` : ''}
+                                                    </strong>
                                                 </div>
                                             )}
                                             <div>
