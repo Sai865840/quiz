@@ -26,7 +26,7 @@ export default function Analytics() {
             try {
                 if (subjects.length === 0) await fetchSubjects(user.uid);
                 await fetchPerformance(user.uid);
-                const s = await sessionService.getRecentSessions(user.uid, 50);
+                const s = await sessionService.getRecentSessions(user.uid, 500, 500);
                 setSessions(s);
             } catch (err) {
                 console.error('Analytics load error:', err);
@@ -48,10 +48,8 @@ export default function Analytics() {
 
     // ─── Summary Stats ───
     const summary = useMemo(() => {
-        const entries = Object.values(performanceMap || {});
-        const totalQ = entries.length;
-        const totalCorrect = entries.reduce((s, p) => s + (p.timesCorrect || 0), 0);
-        const totalAsked = entries.reduce((s, p) => s + (p.timesAsked || 0), 0);
+        const totalAsked = filteredSessions.reduce((s, ss) => s + (ss.answered || 0), 0);
+        const totalCorrect = filteredSessions.reduce((s, ss) => s + (ss.correct || 0), 0);
         const accuracy = totalAsked > 0 ? Math.round((totalCorrect / totalAsked) * 100) : 0;
 
         // Study time from filtered sessions
@@ -76,8 +74,8 @@ export default function Analytics() {
             else if (d > 0) break;
         }
 
-        return { totalQ, accuracy, studyTime, streak, totalSessions: filteredSessions.length };
-    }, [performanceMap, filteredSessions, sessions]);
+        return { totalAsked, accuracy, studyTime, streak, totalSessions: filteredSessions.length };
+    }, [filteredSessions, sessions]);
 
     // ─── Activity Heatmap Data (12 weeks) ───
     const heatmapData = useMemo(() => {
@@ -206,7 +204,7 @@ export default function Analytics() {
     }, [summary, masteryDist, subjectStats, sessions, totalMastery]);
 
     const statCards = [
-        { label: 'TOTAL QUESTIONS', value: summary.totalQ.toString(), color: '#6C63FF' },
+        { label: 'TOTAL QUESTIONS', value: summary.totalAsked.toString(), color: '#6C63FF' },
         { label: 'OVERALL ACCURACY', value: summary.accuracy > 0 ? `${summary.accuracy}%` : '—', color: '#00D9A3' },
         { label: 'STUDY TIME', value: summary.studyTime, color: '#FFB347' },
         { label: 'CURRENT STREAK', value: `${summary.streak} day${summary.streak !== 1 ? 's' : ''}`, color: '#FF6B6B' },

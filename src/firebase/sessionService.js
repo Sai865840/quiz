@@ -143,12 +143,12 @@ export async function getInProgressSession(uid) {
     return session;
 }
 
-export async function getRecentSessions(uid, count = 5) {
+export async function getRecentSessions(uid, count = 5, queryLimit = 50) {
     const ref = collection(db, 'sessions');
     const q = query(
         ref,
         where('userId', '==', uid),
-        limit(50)
+        limit(queryLimit)
     );
     const snap = await getDocs(q);
     // Filter and sort client-side to avoid composite index requirement
@@ -163,6 +163,73 @@ export async function getRecentSessions(uid, count = 5) {
     });
 
     return completed.slice(0, count);
+}
+
+export async function getDashboardSessionsData(uid) {
+    const ref = collection(db, 'sessions');
+    const q = query(
+        ref,
+        where('userId', '==', uid),
+        limit(150) // High enough limit to comfortably envelope a day's or recent weeks worth of sessions
+    );
+    const snap = await getDocs(q);
+
+    const completed = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((s) => s.status === 'completed');
+
+    completed.sort((a, b) => {
+        const aMs = a.endTime?.toDate ? a.endTime.toDate().getTime() : 0;
+        const bMs = b.endTime?.toDate ? b.endTime.toDate().getTime() : 0;
+        return bMs - aMs;
+    });
+
+    const recentSessions = completed.slice(0, 5);
+
+    // Compute Today's Stats
+    const now = new Date();
+    const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+
+    const todaySessions = completed.filter(s => {
+        if (!s.endTime) return false;
+        const endDate = s.endTime.toDate ? s.endTime.toDate() : new Date(s.endTime);
+        const sDateStr = endDate.getFullYear() + '-' + String(endDate.getMonth() + 1).padStart(2, '0') + '-' + String(endDate.getDate()).padStart(2, '0');
+        return sDateStr === todayStr;
+    });
+
+    const answered = todaySessions.reduce((s, ss) => s + (ss.answered || 0), 0);
+    const correct = todaySessions.reduce((s, ss) => s + (ss.correct || 0), 0);
+    const accuracy = answered > 0 ? Math.round((correct / answered) * 100) : 0;
+
+    // Compute Streak
+    let streak = 0;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let d = 0; d < 60; d++) { // Check up to 60 days of history retrieved in the 150 items
+        const checkDate = new Date(today);
+        checkDate.setDate(checkDate.getDate() - d);
+        const checkStr = checkDate.getFullYear() + '-' + String(checkDate.getMonth() + 1).padStart(2, '0') + '-' + String(checkDate.getDate()).padStart(2, '0');
+
+        const hasSession = completed.some((s) => {
+            if (!s.endTime) return false;
+            const endDate = s.endTime?.toDate ? s.endTime.toDate() : new Date(s.endTime);
+            const sDateStr = endDate.getFullYear() + '-' + String(endDate.getMonth() + 1).padStart(2, '0') + '-' + String(endDate.getDate()).padStart(2, '0');
+            return sDateStr === checkStr;
+        });
+
+        if (hasSession) {
+            streak++;
+        } else if (d > 0) {
+            break; // Streak is contiguous
+        }
+    }
+
+    return {
+        recentSessions,
+        todayStats: { sessions: todaySessions.length, answered, correct, accuracy },
+        streak
+    };
 }
 
 // ─── Templates ───
