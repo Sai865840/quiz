@@ -67,41 +67,64 @@ export default function Dashboard() {
         let correct = 0;
         let sessions = 0;
 
+        // If userProfile exists and has todayStats for today, use it.
+        // Otherwise fallback to calculation from recentSessions for backward compatibility / fresh loads
         if (userProfile?.todayStats?.date === todayStr) {
             answered = userProfile.todayStats.answered || 0;
             correct = userProfile.todayStats.correct || 0;
             sessions = userProfile.todayStats.sessions || 0;
+        } else {
+            const todaySessions = recentSessions.filter((s) => {
+                if (!s.endTime) return false;
+                const endDate = s.endTime?.toDate ? s.endTime.toDate() : new Date(s.endTime);
+                return endDate.toISOString().split('T')[0] === now.toISOString().split('T')[0];
+            });
+
+            answered = todaySessions.reduce((s, ss) => s + (ss.answered || 0), 0);
+            correct = todaySessions.reduce((s, ss) => s + (ss.correct || 0), 0);
+            sessions = todaySessions.length;
         }
 
         const accuracy = answered > 0 ? Math.round((correct / answered) * 100) : 0;
         return { sessions, answered, correct, accuracy };
-    }, [userProfile]);
+    }, [userProfile, recentSessions]);
 
     // Performance-based stats (lightweight — from performanceMap only, no questions fetch)
     const perfStats = useMemo(() => {
         const entries = Object.values(performanceMap || {});
-        const mastered = entries.filter((p) => (p.masteryLevel || 0) >= 4).length;
-        const wrongRemaining = entries.filter((p) => (p.timesWrong || 0) > 0 && (p.masteryLevel || 0) < 4).length;
-        const totalTracked = entries.length;
-        const totalCorrect = entries.reduce((s, p) => s + (p.timesCorrect || 0), 0);
-        const totalAsked = entries.reduce((s, p) => s + (p.timesAsked || 0), 0);
+
+        let mastered = 0;
+        let wrongRemaining = 0;
+        let totalTracked = 0;
+        let totalCorrect = 0;
+        let totalAsked = 0;
+        let dueToday = 0;
+        let stale = 0;
+
+        if (entries.length > 0) {
+            totalTracked = entries.length;
+            mastered = entries.filter((p) => (p.masteryLevel || 0) >= 4).length;
+            wrongRemaining = entries.filter((p) => (p.timesWrong || 0) > 0 && (p.masteryLevel || 0) < 4).length;
+            totalCorrect = entries.reduce((s, p) => s + (p.timesCorrect || 0), 0);
+            totalAsked = entries.reduce((s, p) => s + (p.timesAsked || 0), 0);
+
+            // Due today count
+            const now = new Date();
+            now.setHours(23, 59, 59, 999);
+            dueToday = entries.filter((p) => {
+                if (!p.nextDue) return false;
+                return new Date(p.nextDue) <= now;
+            }).length;
+
+            // Stale count (30+ days)
+            stale = entries.filter((p) => {
+                if (!p.lastAsked) return false;
+                const daysSince = (Date.now() - new Date(p.lastAsked).getTime()) / (1000 * 60 * 60 * 24);
+                return daysSince >= 30;
+            }).length;
+        }
+
         const overallAccuracy = totalAsked > 0 ? Math.round((totalCorrect / totalAsked) * 100) : 0;
-
-        // Due today count
-        const now = new Date();
-        now.setHours(23, 59, 59, 999);
-        const dueToday = entries.filter((p) => {
-            if (!p.nextDue) return false;
-            return new Date(p.nextDue) <= now;
-        }).length;
-
-        // Stale count (30+ days)
-        const stale = entries.filter((p) => {
-            if (!p.lastAsked) return false;
-            const daysSince = (Date.now() - new Date(p.lastAsked).getTime()) / (1000 * 60 * 60 * 24);
-            return daysSince >= 30;
-        }).length;
-
         return { mastered, wrongRemaining, totalTracked, overallAccuracy, dueToday, stale };
     }, [performanceMap]);
 
@@ -153,7 +176,32 @@ export default function Dashboard() {
 
     // Streak from user profile
     const streak = useMemo(() => {
-        if (!userProfile?.streak || !userProfile?.lastSessionDate) return 0;
+        if (!userProfile?.streak || !userProfile?.lastSessionDate) {
+            // Fallback to recentSessions streak calculation for older accounts transitioning to new system
+            if (recentSessions.length === 0) return 0;
+            let count = 0;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            for (let d = 0; d < 30; d++) {
+                const checkDate = new Date(today);
+                checkDate.setDate(checkDate.getDate() - d);
+                const checkStr = checkDate.toISOString().split('T')[0];
+
+                const hasSession = recentSessions.some((s) => {
+                    if (!s.endTime) return false;
+                    const endDate = s.endTime?.toDate ? s.endTime.toDate() : new Date(s.endTime);
+                    return endDate.toISOString().split('T')[0] === checkStr;
+                });
+
+                if (hasSession) {
+                    count++;
+                } else if (d > 0) {
+                    break; // streak broken
+                }
+            }
+            return count;
+        }
 
         const now = new Date();
         const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
@@ -170,7 +218,7 @@ export default function Dashboard() {
         }
 
         return userProfile.streak;
-    }, [userProfile]);
+    }, [userProfile, recentSessions]);
 
     const totalQuestions = subjects.reduce((sum, s) => sum + (s.questionCount || 0), 0);
 
