@@ -68,36 +68,57 @@ export const useSessionStore = create((set, get) => ({
         const isCorrect = userAnswer === correctAnswer;
         const timeSpent = Math.round((Date.now() - (state.questionStartTime || Date.now())) / 1000);
 
+        const prevAnswer = state.answers[questionId];
+        const isAlreadyAnswered = !!(prevAnswer && prevAnswer.userAnswer != null);
+        const wasCorrect = isAlreadyAnswered ? prevAnswer.isCorrect : false;
+
+        let newAnswered = state.answered;
+        let newCorrect = state.correct;
+        let newWrong = state.wrong;
+
+        if (!isAlreadyAnswered) {
+            newAnswered += 1;
+            if (isCorrect) newCorrect += 1;
+            else newWrong += 1;
+        } else {
+            if (wasCorrect && !isCorrect) {
+                newCorrect -= 1;
+                newWrong += 1;
+            } else if (!wasCorrect && isCorrect) {
+                newCorrect += 1;
+                newWrong -= 1;
+            }
+        }
+
         const result = {
             questionId,
             questionText: state.questions[state.currentIndex]?.text || '',
             userAnswer,
             correctAnswer,
             isCorrect,
-            timeSpent,
-            confidence: null,
-            flagged: false,
+            timeSpent: isAlreadyAnswered ? (prevAnswer.timeSpent || 0) + timeSpent : timeSpent,
+            confidence: prevAnswer?.confidence || null,
+            flagged: prevAnswer?.flagged || false,
             attemptedAt: new Date().toISOString(),
             optionOrder: state.questionOrder[questionId] || ['A', 'B', 'C', 'D'],
         };
 
         set((s) => ({
             answers: { ...s.answers, [questionId]: result },
-            answered: s.answered + 1,
-            correct: s.correct + (isCorrect ? 1 : 0),
-            wrong: s.wrong + (isCorrect ? 0 : 1),
+            answered: newAnswered,
+            correct: newCorrect,
+            wrong: newWrong,
             showingAnswer: true,
             selectedOption: userAnswer,
         }));
 
         // Checkpoint every 10 questions
-        const newAnswered = state.answered + 1;
         if (newAnswered % 10 === 0 && state.sessionId) {
             const updatedAnswers = { ...state.answers, [questionId]: result };
             sessionService.updateSession(state.sessionId, {
                 answered: newAnswered,
-                correct: state.correct + (isCorrect ? 1 : 0),
-                wrong: state.wrong + (isCorrect ? 0 : 1),
+                correct: newCorrect,
+                wrong: newWrong,
                 questionResults: Object.values(updatedAnswers),
             }).catch((err) => console.error('Checkpoint save failed:', err));
         }
@@ -129,10 +150,13 @@ export const useSessionStore = create((set, get) => ({
             optionOrder: state.questionOrder[questionId] || ['A', 'B', 'C', 'D'],
         };
 
-        set((s) => ({
-            answers: { ...s.answers, [questionId]: result },
-            skipped: s.skipped + 1,
-        }));
+        set((s) => {
+            const alreadySkippedInStore = s.answers[questionId]?.userAnswer === null && s.answers[questionId]?.isSkipped === true;
+            return {
+                answers: { ...s.answers, [questionId]: { ...result, isSkipped: true } },
+                skipped: alreadySkippedInStore ? s.skipped : s.skipped + 1,
+            };
+        });
     },
 
     flagQuestion: (questionId) => {
