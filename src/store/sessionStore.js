@@ -233,6 +233,7 @@ export const useSessionStore = create((set, get) => ({
                 }
                 if (state.currentIndex < state.questions.length - 1) {
                     get().nextQuestion();
+                    return;
                 }
             }
             set({ timeRemaining: Math.max(0, newTime) });

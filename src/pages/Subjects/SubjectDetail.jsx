@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useDataStore } from '../../store/dataStore';
 import { Modal } from '../../components/ui';
-import { parseCSV, getSampleCSV } from '../../utils/csvParser';
+import { parseJSON, getSampleJSON } from '../../utils/jsonParser';
 
 export default function SubjectDetail() {
     const { subjectId } = useParams();
@@ -35,12 +35,12 @@ export default function SubjectDetail() {
     const [qImportant, setQImportant] = useState(false);
     const [savingQuestion, setSavingQuestion] = useState(false);
 
-    // CSV import
-    const [showCSVModal, setShowCSVModal] = useState(false);
-    const [csvChapterId, setCsvChapterId] = useState(null);
-    const [csvText, setCsvText] = useState('');
-    const [csvResult, setCsvResult] = useState(null);
-    const [importingCSV, setImportingCSV] = useState(false);
+    // JSON import
+    const [showJSONModal, setShowJSONModal] = useState(false);
+    const [jsonChapterId, setJsonChapterId] = useState(null);
+    const [jsonText, setJsonText] = useState('');
+    const [jsonResult, setJsonResult] = useState(null);
+    const [importingJSON, setImportingJSON] = useState(false);
     const fileInputRef = useRef(null);
 
     const subject = subjects.find((s) => s.id === subjectId);
@@ -125,13 +125,13 @@ export default function SubjectDetail() {
         }
     };
 
-    // ─── CSV Import ───
+    // ─── JSON Import ───
 
-    const openCSVModal = (chapterId) => {
-        setCsvChapterId(chapterId);
-        setCsvText('');
-        setCsvResult(null);
-        setShowCSVModal(true);
+    const openJSONModal = (chapterId) => {
+        setJsonChapterId(chapterId);
+        setJsonText('');
+        setJsonResult(null);
+        setShowJSONModal(true);
     };
 
     const handleFileUpload = (e) => {
@@ -140,35 +140,35 @@ export default function SubjectDetail() {
         const reader = new FileReader();
         reader.onload = (ev) => {
             const text = ev.target?.result;
-            setCsvText(text);
-            setCsvResult(parseCSV(text));
+            setJsonText(text);
+            setJsonResult(parseJSON(text));
         };
         reader.readAsText(file);
         e.target.value = '';
     };
 
-    const handleParseCSV = () => {
-        if (!csvText.trim()) return;
-        setCsvResult(parseCSV(csvText));
+    const handleParseJSON = () => {
+        if (!jsonText.trim()) return;
+        setJsonResult(parseJSON(jsonText));
     };
 
-    const handleImportCSV = async () => {
-        if (!csvResult?.valid?.length || !user?.uid || !csvChapterId) return;
-        setImportingCSV(true);
+    const handleImportJSON = async () => {
+        if (!jsonResult?.valid?.length || !user?.uid || !jsonChapterId) return;
+        setImportingJSON(true);
         try {
-            await addQuestions(user.uid, subjectId, csvChapterId, csvResult.valid);
-            setShowCSVModal(false);
+            await addQuestions(user.uid, subjectId, jsonChapterId, jsonResult.valid);
+            setShowJSONModal(false);
         } catch (err) {
-            console.error('Failed to import CSV:', err);
+            console.error('Failed to import JSON:', err);
         } finally {
-            setImportingCSV(false);
+            setImportingJSON(false);
         }
     };
 
-    const loadSampleCSV = () => {
-        const sample = getSampleCSV();
-        setCsvText(sample);
-        setCsvResult(parseCSV(sample));
+    const loadSampleJSON = () => {
+        const sample = getSampleJSON();
+        setJsonText(sample);
+        setJsonResult(parseJSON(sample));
     };
 
     if (!subject && !chaptersLoading) {
@@ -273,7 +273,7 @@ export default function SubjectDetail() {
                                                 <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
                                             </svg>
                                         </button>
-                                        <button className="np-icon-btn" title="Import CSV" onClick={() => openCSVModal(chapter.id)}>
+                                        <button className="np-icon-btn" title="Import JSON" onClick={() => openJSONModal(chapter.id)}>
                                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                                 <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
                                             </svg>
@@ -315,8 +315,8 @@ export default function SubjectDetail() {
                                                     <button className="np-btn np-btn-outline np-btn-sm" onClick={() => openQuestionModal(chapter.id)}>
                                                         Add Manually
                                                     </button>
-                                                    <button className="np-btn np-btn-outline np-btn-sm" onClick={() => openCSVModal(chapter.id)}>
-                                                        📤 Import CSV
+                                                    <button className="np-btn np-btn-outline np-btn-sm" onClick={() => openJSONModal(chapter.id)}>
+                                                        📤 Import JSON
                                                     </button>
                                                 </div>
                                             </div>
@@ -471,13 +471,19 @@ export default function SubjectDetail() {
                 </div>
             </Modal>
 
-            {/* ─── CSV Import Modal ─── */}
-            <Modal isOpen={showCSVModal} onClose={() => setShowCSVModal(false)} title="Import Questions from CSV" size="lg">
+            {/* ─── JSON Import Modal ─── */}
+            <Modal isOpen={showJSONModal} onClose={() => setShowJSONModal(false)} title="Import Questions from JSON" size="lg">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-                        Upload a CSV file or paste CSV content below. Required columns:
-                        <code style={{ display: 'block', marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', fontSize: '0.78rem', color: 'var(--primary)' }}>
-                            question, optionA, optionB, optionC, optionD, correctOption, explanation, important
+                        Upload a JSON file or paste JSON content below. The JSON should be an array of objects. Required keys:
+                        <code style={{ display: 'block', marginTop: 8, padding: '10px 14px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', fontSize: '0.78rem', color: 'var(--primary)', whiteSpace: 'pre-wrap' }}>
+                            {`[
+  {
+    "question": "text", "optionA": "text", "optionB": "text",
+    "optionC": "text", "optionD": "text", "correctOption": "A",
+    "explanation": "text", "important": false
+  }
+]`}
                         </code>
                     </div>
 
@@ -485,41 +491,41 @@ export default function SubjectDetail() {
                         <button className="np-btn np-btn-outline np-btn-sm" onClick={() => fileInputRef.current?.click()}>
                             📁 Choose File
                         </button>
-                        <button className="np-btn np-btn-outline np-btn-sm" onClick={loadSampleCSV}>
+                        <button className="np-btn np-btn-outline np-btn-sm" onClick={loadSampleJSON}>
                             📋 Load Sample
                         </button>
-                        <input ref={fileInputRef} type="file" accept=".csv,.tsv,.txt" style={{ display: 'none' }} onChange={handleFileUpload} />
+                        <input ref={fileInputRef} type="file" accept=".json,.txt" style={{ display: 'none' }} onChange={handleFileUpload} />
                     </div>
 
                     <textarea
                         rows={8}
-                        placeholder="Paste CSV content here..."
-                        value={csvText}
-                        onChange={(e) => { setCsvText(e.target.value); setCsvResult(null); }}
+                        placeholder="Paste JSON content here..."
+                        value={jsonText}
+                        onChange={(e) => { setJsonText(e.target.value); setJsonResult(null); }}
                         style={{ resize: 'vertical', fontFamily: 'monospace', fontSize: '0.8rem' }}
                     />
 
-                    {!csvResult && csvText.trim() && (
-                        <button className="np-btn np-btn-outline np-btn-md" onClick={handleParseCSV}>
+                    {!jsonResult && jsonText.trim() && (
+                        <button className="np-btn np-btn-outline np-btn-md" onClick={handleParseJSON}>
                             🔍 Preview Import
                         </button>
                     )}
 
-                    {csvResult && (
+                    {jsonResult && (
                         <div style={{ padding: 16, borderRadius: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)' }}>
-                            <div style={{ display: 'flex', gap: 16, marginBottom: csvResult.errors.length ? 12 : 0 }}>
+                            <div style={{ display: 'flex', gap: 16, marginBottom: jsonResult.errors.length ? 12 : 0 }}>
                                 <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#00D9A3' }}>
-                                    ✓ {csvResult.valid.length} valid question{csvResult.valid.length !== 1 ? 's' : ''}
+                                    ✓ {jsonResult.valid.length} valid question{jsonResult.valid.length !== 1 ? 's' : ''}
                                 </span>
-                                {csvResult.errors.length > 0 && (
+                                {jsonResult.errors.length > 0 && (
                                     <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--error)' }}>
-                                        ✗ {csvResult.errors.length} error{csvResult.errors.length !== 1 ? 's' : ''}
+                                        ✗ {jsonResult.errors.length} error{jsonResult.errors.length !== 1 ? 's' : ''}
                                     </span>
                                 )}
                             </div>
-                            {csvResult.errors.length > 0 && (
+                            {jsonResult.errors.length > 0 && (
                                 <div style={{ maxHeight: 120, overflowY: 'auto', fontSize: '0.78rem', color: 'var(--error)', lineHeight: 1.6 }}>
-                                    {csvResult.errors.map((err, i) => (
+                                    {jsonResult.errors.map((err, i) => (
                                         <div key={i}>• {err}</div>
                                     ))}
                                 </div>
@@ -528,13 +534,13 @@ export default function SubjectDetail() {
                     )}
 
                     <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
-                        <button className="np-btn np-btn-outline np-btn-md" onClick={() => setShowCSVModal(false)}>Cancel</button>
+                        <button className="np-btn np-btn-outline np-btn-md" onClick={() => setShowJSONModal(false)}>Cancel</button>
                         <button
                             className="np-btn np-btn-primary np-btn-md"
-                            onClick={handleImportCSV}
-                            disabled={importingCSV || !csvResult?.valid?.length}
+                            onClick={handleImportJSON}
+                            disabled={importingJSON || !jsonResult?.valid?.length}
                         >
-                            {importingCSV ? 'Importing...' : `Import ${csvResult?.valid?.length || 0} Questions`}
+                            {importingJSON ? 'Importing...' : `Import ${jsonResult?.valid?.length || 0} Questions`}
                         </button>
                     </div>
                 </div>
