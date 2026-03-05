@@ -245,7 +245,7 @@ export const useSessionStore = create((set, get) => ({
     pauseSession: () => set({ paused: true }),
     resumeSession: () => set({ paused: false }),
 
-    endSession: async () => {
+    endSession: async (uid) => {
         const state = get();
         if (!state.sessionId) return null;
 
@@ -253,18 +253,38 @@ export const useSessionStore = create((set, get) => ({
             ? Math.round((state.correct / state.answered) * 100)
             : 0;
 
+        const questionResults = Object.values(state.answers);
+
         const finalData = {
             answered: state.answered,
             correct: state.correct,
             wrong: state.wrong,
             skipped: state.skipped,
             score,
-            questionResults: Object.values(state.answers),
+            questionResults,
         };
 
+        // Complete the session — must await so results page can read it
         await sessionService.completeSession(state.sessionId, finalData);
+
+        // Update performance in background — errors here must NEVER block navigation
+        let updatedPerfMap = null;
+        if (uid) {
+            try {
+                updatedPerfMap = await sessionService.batchUpdatePerformance(uid, questionResults);
+            } catch (perfErr) {
+                console.error('[Performance] Failed to update performance map:', perfErr);
+                // Non-fatal: user can still see results, performance may be out of date until next sync
+            }
+        }
+
         set({ status: 'completed' });
-        return { sessionId: state.sessionId, score, ...finalData };
+        // Invalidate lastSession cache so Practice page refreshes on next visit
+        try {
+            const { useDataStore } = await import('./dataStore');
+            useDataStore.getState().invalidateSessionCache();
+        } catch (_) { /* non-fatal */ }
+        return { sessionId: state.sessionId, score, ...finalData, updatedPerfMap };
     },
 
     resetSession: () => set({

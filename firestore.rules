@@ -22,8 +22,13 @@ service cloud.firestore {
         }
       }
 
-      // ─── Performance (per-question stats) ───
+      // ─── Performance (per-question stats — legacy subcollection) ───
       match /performance/{questionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // ─── Performance Summary (single doc holding all question performance) ───
+      match /performanceSummary/{docId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
 

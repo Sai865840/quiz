@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useDataStore } from '../../store/dataStore';
@@ -26,7 +26,7 @@ export default function TestSession() {
     const [searchParams] = useSearchParams();
     const { user } = useAuthStore();
     const dataStore = useDataStore();
-    const { subjects } = dataStore;
+    const { subjects, performanceMap, fetchPerformance } = dataStore;
     const initSession = useSessionStore((s) => s.initSession);
 
     // Config state
@@ -45,19 +45,21 @@ export default function TestSession() {
 
     // Data
     const [allQuestions, setAllQuestions] = useState([]);
-    const [performance, setPerformance] = useState({});
     const [loading, setLoading] = useState(true);
     const [starting, setStarting] = useState(false);
 
-    // Load subjects + questions
+    // Tracks an in-flight fetch to avoid launching a second concurrent one
+    const fetchingRef = useRef(false);
+
+    // Load subjects + performance (from store — respects TTL cache, 0 reads if already fresh)
     useEffect(() => {
         if (!user?.uid) return;
         (async () => {
             setLoading(true);
             try {
                 if (subjects.length === 0) await dataStore.fetchSubjects(user.uid);
-                const perf = await sessionService.getPerformanceMap(user.uid);
-                setPerformance(perf);
+                // fetchPerformance reads from store cache if fresh, Firebase only if stale
+                await fetchPerformance(user.uid);
             } catch (err) {
                 console.error('Failed to load config data:', err);
             } finally {
@@ -66,15 +68,25 @@ export default function TestSession() {
         })();
     }, [user?.uid]);
 
-    // Fetch questions when scope changes
+    // Re-run whenever scope OR underlying data (chapters/questions) changes.
+    // fetchQuestionsForScope reads from the Zustand cache first — no extra Firebase
+    // reads if data is already loaded, so re-runs triggered by store updates are cheap.
     useEffect(() => {
         if (!user?.uid || subjects.length === 0) return;
+        if (fetchingRef.current) return; // prevent concurrent duplicate fetches
+        fetchingRef.current = true;
         (async () => {
-            const scope = { subjectIds: selectedSubjects, chapterIds: selectedChapters };
-            const qs = await fetchQuestionsForScope(user.uid, scope, dataStore);
-            setAllQuestions(qs);
+            try {
+                const scope = { subjectIds: selectedSubjects, chapterIds: selectedChapters };
+                const qs = await fetchQuestionsForScope(user.uid, scope, dataStore);
+                setAllQuestions(qs);
+            } finally {
+                fetchingRef.current = false;
+            }
         })();
-    }, [user?.uid, selectedSubjects, selectedChapters, subjects, dataStore.chapters, dataStore.questions]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [user?.uid, selectedSubjects, selectedChapters, subjects.length,
+    dataStore.chapters, dataStore.questions]);
 
     // Available chapters for selected subject
     const availableChapters = useMemo(() => {
@@ -102,25 +114,25 @@ export default function TestSession() {
         setStarting(true);
 
         try {
-            // Build question list based on mode
+            // Build question list based on mode (uses in-memory performanceMap from store)
             let selected = [];
             const count = Math.min(finalCount, availableCount);
 
             switch (selectedMode) {
                 case 'smart':
-                    selected = buildSmartSession(allQuestions, performance, count);
+                    selected = buildSmartSession(allQuestions, performanceMap, count);
                     break;
                 case 'wrong':
-                    selected = buildWrongQuestions(allQuestions, performance).slice(0, count);
+                    selected = buildWrongQuestions(allQuestions, performanceMap).slice(0, count);
                     break;
                 case 'due_today':
-                    selected = buildDueToday(allQuestions, performance).slice(0, count);
+                    selected = buildDueToday(allQuestions, performanceMap).slice(0, count);
                     break;
                 case 'unseen':
-                    selected = buildUnseenFirst(allQuestions, performance, count).slice(0, count);
+                    selected = buildUnseenFirst(allQuestions, performanceMap, count).slice(0, count);
                     break;
                 case 'flagged':
-                    selected = buildFlaggedOnly(allQuestions, performance).slice(0, count);
+                    selected = buildFlaggedOnly(allQuestions, performanceMap).slice(0, count);
                     break;
                 case 'random':
                 default:

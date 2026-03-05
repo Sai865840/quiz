@@ -2,11 +2,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useDataStore } from '../../store/dataStore';
-import * as sessionService from '../../firebase/sessionService';
 
 
 const MODES = [
-    { key: 'smart', title: 'Smart Session', icon: '🧠', color: '#8B5CF6', desc: '70% important, 30% normal — optimized mix' },
+    { key: 'smart', title: 'Smart Session', icon: '🧠', color: '#8B5CF6', desc: 'Less attempted questions first' },
     { key: 'wrong', title: 'Wrong Questions', icon: '❌', color: '#FF6B6B', desc: 'Focus on your past mistakes' },
     { key: 'due_today', title: 'Due Today', icon: '📅', color: '#00D9A3', desc: 'Spaced repetition reviews' },
     { key: 'unseen', title: 'Unseen First', icon: '👀', color: '#FFB347', desc: 'Tackle new questions first' },
@@ -18,18 +17,17 @@ export default function Practice() {
     const navigate = useNavigate();
     const { user } = useAuthStore();
     const dataStore = useDataStore();
-    const { subjects, fetchSubjects, performanceMap, fetchPerformance } = dataStore;
-    const [lastSession, setLastSession] = useState(null);
-    const [templates, setTemplates] = useState([]);
+    const {
+        subjects, fetchSubjects, performanceMap, fetchPerformance,
+        lastSession, templates, fetchLastSessionAndTemplates,
+    } = dataStore;
 
     useEffect(() => {
         if (!user?.uid) return;
         if (subjects.length === 0) fetchSubjects(user.uid);
         fetchPerformance(user.uid);
-        sessionService.getRecentSessions(user.uid, 1).then((sessions) => {
-            if (sessions.length > 0) setLastSession(sessions[0]);
-        });
-        sessionService.getTemplates(user.uid).then(setTemplates);
+        // fetchLastSessionAndTemplates uses TTL — 0 Firebase reads if fresh
+        fetchLastSessionAndTemplates(user.uid);
     }, [user?.uid]);
 
 

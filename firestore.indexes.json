@@ -53,7 +53,15 @@
             "queryScope": "COLLECTION",
             "fields": [
                 {
-                    "fieldPath": "createdAt",
+                    "fieldPath": "userId",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "status",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "endTime",
                     "order": "DESCENDING"
                 }
             ]

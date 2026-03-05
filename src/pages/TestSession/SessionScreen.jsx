@@ -2,11 +2,13 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSessionStore } from '../../store/sessionStore';
 import { useAuthStore } from '../../store/authStore';
+import { useDataStore } from '../../store/dataStore';
 import * as sessionService from '../../firebase/sessionService';
 
 export default function SessionScreen() {
     const navigate = useNavigate();
     const { user } = useAuthStore();
+    const { updatePerformanceMap } = useDataStore();
     const session = useSessionStore();
     const timerRef = useRef(null);
     const [ending, setEnding] = useState(false);
@@ -141,9 +143,11 @@ export default function SessionScreen() {
             }
         });
         try {
-            const result = await session.endSession();
+            // endSession handles batchUpdatePerformance internally and returns updatedPerfMap
+            const result = await session.endSession(user?.uid);
+            // Push updated performance into the store (avoids re-fetch on next page)
+            if (result?.updatedPerfMap) updatePerformanceMap(result.updatedPerfMap);
             if (user?.uid && result) {
-                await sessionService.batchUpdatePerformance(user.uid, result.questionResults);
                 await sessionService.updateUserAggregateStats(user.uid, result);
             }
             navigate(`/test/results?session=${result.sessionId}`);

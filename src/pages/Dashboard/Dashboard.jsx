@@ -5,13 +5,12 @@ import { useDataStore } from '../../store/dataStore';
 import { getGreeting } from '../../utils/helpers';
 import { MOTIVATIONAL_QUOTES } from '../../constants';
 import * as sessionService from '../../firebase/sessionService';
-import * as firestoreService from '../../firebase/firestoreService';
 import ProgressRing from '../../components/ui/ProgressRing';
 
 export default function Dashboard() {
     const navigate = useNavigate();
     const { user, userProfile } = useAuthStore();
-    const { subjects, fetchSubjects, performanceMap, fetchPerformance } = useDataStore();
+    const { subjects, fetchSubjects, performanceMap, fetchPerformance, fetchUserProfile } = useDataStore();
 
     const [recentSessions, setRecentSessions] = useState([]);
     const [todayStats, setTodayStats] = useState({ sessions: 0, answered: 0, correct: 0, accuracy: 0 });
@@ -33,11 +32,8 @@ export default function Dashboard() {
                 if (subjects.length === 0) await fetchSubjects(user.uid);
                 await fetchPerformance(user.uid);
 
-                // Fetch fresh user profile for accurate exam date / goals
-                const profile = await firestoreService.getUserProfile(user.uid);
-                if (profile) {
-                    useAuthStore.getState().setUserProfile(profile);
-                }
+                // Fetch user profile with 10-min TTL — 0 reads if navigating back within 10 min
+                await fetchUserProfile(user.uid);
 
                 // Fetch dashboard specific session aggregation
                 const sessionsData = await sessionService.getDashboardSessionsData(user.uid);

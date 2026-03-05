@@ -79,15 +79,14 @@ export default function Flashcards() {
             const correct = newResults.filter(r => r.isCorrect).length;
             const score = Math.round((correct / newResults.length) * 100);
             if (user?.uid) {
-                const sessions = await sessionService.getRecentSessions(user.uid, 1);
-                // The latest in-progress session
                 const inProgress = await sessionService.getInProgressSession(user.uid);
                 if (inProgress) {
                     await sessionService.completeSession(inProgress.id, {
                         answered: newResults.length, correct, wrong: newResults.length - correct,
                         skipped: 0, score, questionResults: newResults,
                     });
-                    await sessionService.batchUpdatePerformance(user.uid, newResults);
+                    const updatedPerfMap = await sessionService.batchUpdatePerformance(user.uid, newResults);
+                    if (updatedPerfMap) dataStore.updatePerformanceMap(updatedPerfMap);
                     navigate(`/test/results?session=${inProgress.id}`);
                     return;
                 }

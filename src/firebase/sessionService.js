@@ -1,5 +1,5 @@
 import {
-    doc, collection, addDoc, getDoc, getDocs, updateDoc,
+    doc, collection, addDoc, getDoc, getDocs, updateDoc, setDoc,
     query, where, orderBy, limit, serverTimestamp, writeBatch, runTransaction
 } from 'firebase/firestore';
 import { db } from './config';
@@ -50,22 +50,18 @@ export async function updateUserAggregateStats(uid, sessionResult) {
             const data = userDoc.data();
 
             const now = new Date();
-            // Local timezone date string
             const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
 
             let { streak = 0, lastSessionDate = null, todayStats = { date: '', answered: 0, correct: 0, sessions: 0 } } = data;
 
-            // Reset todayStats if it's a new day
             if (todayStats.date !== todayStr) {
                 todayStats = { date: todayStr, answered: 0, correct: 0, sessions: 0 };
             }
 
-            // Update todayStats
             todayStats.answered += sessionResult.answered || 0;
             todayStats.correct += sessionResult.correct || 0;
             todayStats.sessions += 1;
 
-            // Update streak
             if (lastSessionDate !== todayStr) {
                 if (lastSessionDate) {
                     const lastDate = new Date(lastSessionDate);
@@ -77,7 +73,7 @@ export async function updateUserAggregateStats(uid, sessionResult) {
                     if (diffDays === 1) {
                         streak += 1;
                     } else if (diffDays > 1) {
-                        streak = 1; // reset streak if missed a day
+                        streak = 1;
                     }
                 } else {
                     streak = 1;
@@ -117,14 +113,12 @@ export async function getInProgressSession(uid) {
         limit(10)
     );
     const snap = await getDocs(q);
-    // Filter client-side to avoid composite index
     const inProgress = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((s) => s.status === 'in_progress');
 
     if (inProgress.length === 0) return null;
 
-    // Sort by startTime desc, pick most recent
     inProgress.sort((a, b) => {
         const aMs = a.startTime?.toDate ? a.startTime.toDate().getTime() : 0;
         const bMs = b.startTime?.toDate ? b.startTime.toDate().getTime() : 0;
@@ -132,7 +126,6 @@ export async function getInProgressSession(uid) {
     });
     const session = inProgress[0];
 
-    // Only return sessions from the last 24 hours
     if (session.startTime) {
         const startMs = session.startTime.toDate ? session.startTime.toDate().getTime() : session.startTime;
         if (Date.now() - startMs > 24 * 60 * 60 * 1000) {
@@ -143,26 +136,18 @@ export async function getInProgressSession(uid) {
     return session;
 }
 
-export async function getRecentSessions(uid, count = 5, queryLimit = 50) {
+// ─── Returns last `count` completed sessions — uses server-side filter+sort to minimise reads ───
+export async function getRecentSessions(uid, count = 5) {
     const ref = collection(db, 'sessions');
     const q = query(
         ref,
         where('userId', '==', uid),
-        limit(queryLimit)
+        where('status', '==', 'completed'),
+        orderBy('endTime', 'desc'),
+        limit(count)
     );
     const snap = await getDocs(q);
-    // Filter and sort client-side to avoid composite index requirement
-    const completed = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((s) => s.status === 'completed');
-
-    completed.sort((a, b) => {
-        const aMs = a.endTime?.toDate ? a.endTime.toDate().getTime() : 0;
-        const bMs = b.endTime?.toDate ? b.endTime.toDate().getTime() : 0;
-        return bMs - aMs;
-    });
-
-    return completed.slice(0, count);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 export async function getDashboardSessionsData(uid) {
@@ -170,23 +155,16 @@ export async function getDashboardSessionsData(uid) {
     const q = query(
         ref,
         where('userId', '==', uid),
-        limit(150) // High enough limit to comfortably envelope a day's or recent weeks worth of sessions
+        where('status', '==', 'completed'),
+        orderBy('endTime', 'desc'),
+        limit(150)
     );
     const snap = await getDocs(q);
 
-    const completed = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((s) => s.status === 'completed');
-
-    completed.sort((a, b) => {
-        const aMs = a.endTime?.toDate ? a.endTime.toDate().getTime() : 0;
-        const bMs = b.endTime?.toDate ? b.endTime.toDate().getTime() : 0;
-        return bMs - aMs;
-    });
+    const completed = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
     const recentSessions = completed.slice(0, 5);
 
-    // Compute Today's Stats
     const now = new Date();
     const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
 
@@ -201,12 +179,11 @@ export async function getDashboardSessionsData(uid) {
     const correct = todaySessions.reduce((s, ss) => s + (ss.correct || 0), 0);
     const accuracy = answered > 0 ? Math.round((correct / answered) * 100) : 0;
 
-    // Compute Streak
     let streak = 0;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    for (let d = 0; d < 60; d++) { // Check up to 60 days of history retrieved in the 150 items
+    for (let d = 0; d < 60; d++) {
         const checkDate = new Date(today);
         checkDate.setDate(checkDate.getDate() - d);
         const checkStr = checkDate.getFullYear() + '-' + String(checkDate.getMonth() + 1).padStart(2, '0') + '-' + String(checkDate.getDate()).padStart(2, '0');
@@ -221,7 +198,7 @@ export async function getDashboardSessionsData(uid) {
         if (hasSession) {
             streak++;
         } else if (d > 0) {
-            break; // Streak is contiguous
+            break;
         }
     }
 
@@ -254,29 +231,72 @@ export async function deleteTemplate(uid, templateId) {
     await (await import('firebase/firestore')).deleteDoc(doc(db, 'users', uid, 'templates', templateId));
 }
 
-// ─── Performance ───
+// ─── Performance — Summary Document approach ───
+// Stores ALL question performance as a single Firestore document.
+// 1 doc = 1 read, regardless of whether you have 100 or 10,000 questions.
+// At ~300 bytes per entry, a 1MB doc can hold ~3,300 entries.
+// If you exceed that, add sharding here (not needed until you have 3k+ questions).
 
 import { computeSM2, qualityFromResult, computeMasteryLevel } from '../utils/spacedRepetition';
 
 export { computeMasteryLevel };
 
+const SUMMARY_DOC_PATH = (uid) => doc(db, 'users', uid, 'performanceSummary', 'data');
+
+/**
+ * Reads performance data for all questions in a single Firestore document read.
+ * Returns a map: { [questionId]: performanceData }
+ * Falls back to reading the old subcollection and migrates to summary doc if not found.
+ */
 export async function getPerformanceMap(uid) {
+    const summaryRef = SUMMARY_DOC_PATH(uid);
+    const summarySnap = await getDoc(summaryRef);
+
+    if (summarySnap.exists()) {
+        return summarySnap.data().questions || {};
+    }
+
+    // ── First-time migration: read old subcollection and write summary doc ──
+    console.log('[Performance] Summary doc not found. Migrating from subcollection...');
     const ref = collection(db, 'users', uid, 'performance');
     const snap = await getDocs(ref);
     const map = {};
     snap.docs.forEach((d) => { map[d.id] = d.data(); });
+
+    if (Object.keys(map).length > 0) {
+        // Write the summary doc so future reads are cheap
+        await setDoc(summaryRef, {
+            questions: map,
+            updatedAt: new Date().toISOString(),
+        });
+        console.log(`[Performance] Migrated ${Object.keys(map).length} entries to summary doc.`);
+    }
+
     return map;
 }
 
+/**
+ * Updates performance for a batch of question results.
+ * Reads the entire summary doc ONCE, computes updates in memory, writes back ONCE.
+ * Cost: 1 read + 1 write — regardless of how many questions were answered.
+ */
 export async function batchUpdatePerformance(uid, questionResults) {
-    const batch = writeBatch(db);
+    // Filter unanswered questions up front
+    const answeredResults = questionResults.filter(
+        (r) => r.questionId && r.userAnswer !== null
+    );
+    if (answeredResults.length === 0) return;
 
-    for (const result of questionResults) {
-        if (!result.questionId || result.userAnswer === null) continue; // skip unanswered
+    const summaryRef = SUMMARY_DOC_PATH(uid);
 
-        const perfRef = doc(db, 'users', uid, 'performance', result.questionId);
-        const perfSnap = await getDoc(perfRef);
-        const existing = perfSnap.exists() ? perfSnap.data() : {
+    // Single read of the entire performance map
+    const summarySnap = await getDoc(summaryRef);
+    const currentMap = summarySnap.exists() ? (summarySnap.data().questions || {}) : {};
+
+    const updatedMap = { ...currentMap };
+
+    for (const result of answeredResults) {
+        const existing = currentMap[result.questionId] || {
             timesAsked: 0, timesCorrect: 0, timesWrong: 0,
             streak: 0, intervalDays: 1, masteryLevel: 0,
             easeFactor: 2.5, repetitions: 0,
@@ -287,16 +307,13 @@ export async function batchUpdatePerformance(uid, questionResults) {
         const timesCorrect = (existing.timesCorrect || 0) + (result.isCorrect ? 1 : 0);
         const timesWrong = (existing.timesWrong || 0) + (result.isCorrect ? 0 : 1);
 
-        // Streak — guessed correct does NOT increment streak
         let streak = existing.streak || 0;
         if (result.isCorrect && result.confidence !== 'guessed') {
             streak += 1;
         } else if (!result.isCorrect) {
             streak = 0;
         }
-        // guessed correct: streak stays the same
 
-        // SM-2 Spaced Repetition
         const quality = qualityFromResult(result.isCorrect, result.confidence);
         const sm2 = computeSM2(
             quality,
@@ -309,14 +326,12 @@ export async function batchUpdatePerformance(uid, questionResults) {
         today.setHours(0, 0, 0, 0);
         const nextDue = new Date(today.getTime() + sm2.interval * 24 * 60 * 60 * 1000);
 
-        // Mastery
         const accuracy = timesAsked > 0 ? timesCorrect / timesAsked : 0;
         const masteryLevel = computeMasteryLevel(accuracy, streak, timesAsked, result.confidence);
 
-        // Flagged
         const flagged = result.flagged !== undefined ? result.flagged : (existing.flagged || false);
 
-        const updateData = {
+        updatedMap[result.questionId] = {
             timesAsked, timesCorrect, timesWrong, streak,
             intervalDays: sm2.interval,
             easeFactor: sm2.ef,
@@ -326,13 +341,13 @@ export async function batchUpdatePerformance(uid, questionResults) {
             lastConfidence: result.confidence || null,
             masteryLevel, flagged,
         };
-
-        if (perfSnap.exists()) {
-            batch.update(perfRef, updateData);
-        } else {
-            batch.set(perfRef, updateData);
-        }
     }
 
-    await batch.commit();
+    // Single write back — one Firestore write regardless of session size
+    await setDoc(summaryRef, {
+        questions: updatedMap,
+        updatedAt: new Date().toISOString(),
+    });
+
+    return updatedMap; // Return updated map so caller can refresh store
 }

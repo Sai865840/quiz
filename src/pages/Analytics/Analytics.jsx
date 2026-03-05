@@ -27,7 +27,7 @@ export default function Analytics() {
             try {
                 if (subjects.length === 0) await fetchSubjects(user.uid);
                 await fetchPerformance(user.uid);
-                const s = await sessionService.getRecentSessions(user.uid, 500, 500);
+                const s = await sessionService.getRecentSessions(user.uid, 500);
                 setSessions(s);
             } catch (err) {
                 console.error('Analytics load error:', err);

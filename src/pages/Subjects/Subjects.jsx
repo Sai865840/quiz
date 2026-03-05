@@ -25,10 +25,10 @@ export default function Subjects() {
     const [deleteConfirm, setDeleteConfirm] = useState(null);
 
     useEffect(() => {
-        if (user?.uid) {
+        if (user?.uid && subjects.length === 0) {
             fetchSubjects(user.uid);
         }
-    }, [user?.uid, fetchSubjects]);
+    }, [user?.uid]);
 
     const openAddModal = () => {
         setEditingSubject(null);
