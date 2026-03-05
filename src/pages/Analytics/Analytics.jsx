@@ -18,6 +18,7 @@ export default function Analytics() {
     const [sessions, setSessions] = useState([]);
     const [range, setRange] = useState('month');
     const [loading, setLoading] = useState(true);
+    const [visibleCount, setVisibleCount] = useState(10);
 
     useEffect(() => {
         if (!user?.uid) return;
@@ -53,7 +54,15 @@ export default function Analytics() {
         const accuracy = totalAsked > 0 ? Math.round((totalCorrect / totalAsked) * 100) : 0;
 
         // Study time from filtered sessions
-        const totalMinutes = filteredSessions.reduce((s, ss) => s + (ss.durationSeconds || 0), 0) / 60;
+        // Sum up timeSpent from all questionResults inside each session
+        const totalSeconds = filteredSessions.reduce((s, ss) => {
+            if (ss.questionResults && Array.isArray(ss.questionResults)) {
+                return s + ss.questionResults.reduce((qSum, q) => qSum + (q.timeSpent || 0), 0);
+            }
+            return s + (ss.durationSeconds || 0);
+        }, 0);
+
+        const totalMinutes = totalSeconds / 60;
         const studyTime = totalMinutes >= 60
             ? `${Math.floor(totalMinutes / 60)}h ${Math.round(totalMinutes % 60)}m`
             : `${Math.round(totalMinutes)}m`;
@@ -82,17 +91,22 @@ export default function Analytics() {
         const weeks = 12;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const dayOfWeek = today.getDay();
+        const dayOfWeek = today.getDay(); // 0 (Sun) to 6 (Sat)
+
         // Start from Sunday of (today - 11 weeks)
         const startDate = new Date(today);
         startDate.setDate(startDate.getDate() - dayOfWeek - (weeks - 1) * 7);
 
         const cells = [];
         const sessionMap = {};
+
+        // Map sessions to local date string (YYYY-MM-DD)
         sessions.forEach((s) => {
             const d = s.endTime?.toDate ? s.endTime.toDate() : (s.endTime ? new Date(s.endTime) : null);
             if (!d) return;
-            const key = d.toISOString().split('T')[0];
+            // Adjust to local timezone to prevent off-by-one errors from ISOString
+            const localDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
+            const key = localDate.toISOString().split('T')[0];
             sessionMap[key] = (sessionMap[key] || 0) + (s.answered || 1);
         });
 
@@ -100,7 +114,10 @@ export default function Analytics() {
             const d = new Date(startDate);
             d.setDate(d.getDate() + i);
             if (d > today) break;
-            const key = d.toISOString().split('T')[0];
+
+            // Local date string
+            const localDate = new Date(d.getTime() - (d.getTimezoneOffset() * 60000));
+            const key = localDate.toISOString().split('T')[0];
             cells.push({ date: key, count: sessionMap[key] || 0, day: d.getDay(), week: Math.floor(i / 7) });
         }
         return cells;
@@ -301,7 +318,7 @@ export default function Analytics() {
                     </div>
                 ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {filteredSessions.map((s) => {
+                        {filteredSessions.slice(0, visibleCount).map((s) => {
                             const scoreColor = s.score >= 70 ? '#00D9A3' : s.score >= 40 ? '#FFB347' : '#FF6B6B';
                             const endDate = s.endTime?.toDate ? s.endTime.toDate() : (s.endTime ? new Date(s.endTime) : null);
                             return (
@@ -341,6 +358,15 @@ export default function Analytics() {
                                 </div>
                             );
                         })}
+                        {visibleCount < filteredSessions.length && (
+                            <button
+                                className="np-btn np-btn-outline np-btn-md"
+                                onClick={() => setVisibleCount(c => c + 15)}
+                                style={{ width: '100%', marginTop: 8 }}
+                            >
+                                Load More (+15)
+                            </button>
+                        )}
                     </div>
                 )}
             </div>

@@ -3,10 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useDataStore } from '../../store/dataStore';
 import * as sessionService from '../../firebase/sessionService';
-import {
-    buildWrongQuestions, buildDueToday, buildFlaggedOnly,
-    buildStaleQuestions, fetchQuestionsForScope,
-} from '../../utils/questionAlgorithms';
+
 
 const MODES = [
     { key: 'smart', title: 'Smart Session', icon: '🧠', color: '#8B5CF6', desc: '70% important, 30% normal — optimized mix' },
@@ -24,7 +21,6 @@ export default function Practice() {
     const { subjects, fetchSubjects, performanceMap, fetchPerformance } = dataStore;
     const [lastSession, setLastSession] = useState(null);
     const [templates, setTemplates] = useState([]);
-    const [allQuestions, setAllQuestions] = useState([]);
 
     useEffect(() => {
         if (!user?.uid) return;
@@ -36,25 +32,31 @@ export default function Practice() {
         sessionService.getTemplates(user.uid).then(setTemplates);
     }, [user?.uid]);
 
-    // Fetch all questions for counts
-    useEffect(() => {
-        if (!user?.uid || subjects.length === 0) return;
-        (async () => {
-            const qs = await fetchQuestionsForScope(user.uid, { subjectIds: ['all'] }, dataStore);
-            setAllQuestions(qs);
-        })();
-    }, [user?.uid, subjects, dataStore.chapters, dataStore.questions]);
 
-    // Compute counts for badges
+
+    // Compute counts for badges from performanceMap (0 overhead reading)
     const modeCounts = useMemo(() => {
-        if (allQuestions.length === 0 || !performanceMap) return {};
-        return {
-            wrong: buildWrongQuestions(allQuestions, performanceMap).length,
-            due_today: buildDueToday(allQuestions, performanceMap).length,
-            flagged: buildFlaggedOnly(allQuestions, performanceMap).length,
-            stale: buildStaleQuestions(allQuestions, performanceMap).length,
-        };
-    }, [allQuestions, performanceMap]);
+        if (!performanceMap) return { wrong: 0, due_today: 0, flagged: 0, stale: 0 };
+
+        const perfValues = Object.values(performanceMap);
+
+        // wrong
+        const wrong = perfValues.filter(p => p.timesWrong > 0 && (p.masteryLevel || 0) < 4).length;
+
+        // due today
+        const todayMs = new Date().setHours(23, 59, 59, 999);
+        const due_today = perfValues.filter(p => p.nextDue && new Date(p.nextDue).getTime() <= todayMs).length;
+
+        // flagged
+        const flagged = perfValues.filter(p => p.flagged === true).length;
+
+        // stale (30 days)
+        const now = Date.now();
+        const staleMs = 30 * 24 * 60 * 60 * 1000;
+        const stale = perfValues.filter(p => p.lastAsked && (now - new Date(p.lastAsked).getTime()) >= staleMs).length;
+
+        return { wrong, due_today, flagged, stale };
+    }, [performanceMap]);
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>

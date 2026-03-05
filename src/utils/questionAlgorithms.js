@@ -15,28 +15,19 @@ export function shuffleArray(arr) {
 }
 
 /**
- * Mode 1 — Smart Session: 70% important, 30% normal
+ * Mode 1 — Smart Session: Prioritize least attempted questions
  */
 export function buildSmartSession(questions, performance, count) {
-    const important = questions.filter((q) => q.important === true);
-    const normal = questions.filter((q) => !q.important);
+    // Sort all questions by total attempts (timesAsked) in ascending order
+    // If timesAsked is undefined/missing, it's 0 (meaning least attempted)
+    const sortedQuestions = [...questions].sort((a, b) => {
+        const attemptsA = performance[a.id]?.timesAsked || 0;
+        const attemptsB = performance[b.id]?.timesAsked || 0;
+        return attemptsA - attemptsB;
+    });
 
-    const importantCount = Math.min(Math.ceil(count * 0.7), important.length);
-    const normalCount = Math.min(count - importantCount, normal.length);
-
-    // If important pool is smaller, fill remainder from normal
-    const finalImportant = shuffleArray(important).slice(0, importantCount);
-    let finalNormal = shuffleArray(normal).slice(0, normalCount);
-
-    // If we still need more questions to reach count
-    const remaining = count - finalImportant.length - finalNormal.length;
-    if (remaining > 0) {
-        const extraNormal = shuffleArray(normal.filter((q) => !finalNormal.includes(q))).slice(0, remaining);
-        finalNormal = [...finalNormal, ...extraNormal];
-    }
-
-    // Interleave: don't put all important ones consecutively
-    return interleave(finalImportant, finalNormal);
+    // Take exactly the count requested
+    return sortedQuestions.slice(0, count);
 }
 
 /**
@@ -81,25 +72,32 @@ export function buildDueToday(questions, performance) {
 }
 
 /**
- * Mode 4 — Unseen First: timesAsked === 0 first, then least asked
+ * Mode 4 — Unseen First: Strict timesAsked === 0. Fallback to least asked only if not enough unseen.
  */
-export function buildUnseenFirst(questions, performance) {
+export function buildUnseenFirst(questions, performance, count) {
     const unseen = questions.filter((q) => {
         const perf = performance[q.id];
         return !perf || (perf.timesAsked || 0) === 0;
     });
 
+    // If user requests 50 and we have 50 unseen, we only return unseen.
+    const shuffledUnseen = shuffleArray(unseen);
+    if (shuffledUnseen.length >= count) {
+        return shuffledUnseen.slice(0, count);
+    }
+
+    // If we need more to fill the count, get the seen ones, sorted by least asked
     const seen = questions.filter((q) => {
         const perf = performance[q.id];
         return perf && (perf.timesAsked || 0) > 0;
     });
 
-    // Sort seen by least asked
     seen.sort((a, b) => {
         return (performance[a.id]?.timesAsked || 0) - (performance[b.id]?.timesAsked || 0);
     });
 
-    return [...shuffleArray(unseen), ...seen];
+    const needed = count - shuffledUnseen.length;
+    return [...shuffledUnseen, ...seen.slice(0, needed)];
 }
 
 /**

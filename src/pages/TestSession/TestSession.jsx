@@ -117,7 +117,7 @@ export default function TestSession() {
                     selected = buildDueToday(allQuestions, performance).slice(0, count);
                     break;
                 case 'unseen':
-                    selected = buildUnseenFirst(allQuestions, performance).slice(0, count);
+                    selected = buildUnseenFirst(allQuestions, performance, count).slice(0, count);
                     break;
                 case 'flagged':
                     selected = buildFlaggedOnly(allQuestions, performance).slice(0, count);
