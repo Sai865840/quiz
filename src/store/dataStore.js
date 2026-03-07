@@ -394,22 +394,22 @@ export const useDataStore = create(persist((set, get) => ({
     {
         name: 'np-data-store',
         partialize: (state) => ({
+            // Data — persisted to localStorage
             subjects: state.subjects,
             chapters: state.chapters,
             questions: state.questions,
             performanceMap: state.performanceMap,
-            performanceFetchedAt: state.performanceFetchedAt,
             lastSession: state.lastSession,
-            sessionFetchedAt: state.sessionFetchedAt,
             templates: state.templates,
-            templatesFetchedAt: state.templatesFetchedAt,
             userProfile: state.userProfile,
-            profileFetchedAt: state.profileFetchedAt,
-            // Incremental sync timestamps
+            // Incremental sync timestamps — persisted so delta queries work across reloads
             subjectsSyncedAt: state.subjectsSyncedAt,
             chaptersSyncedAt: state.chaptersSyncedAt,
             questionsSyncedAt: state.questionsSyncedAt,
             performanceSyncedAt: state.performanceSyncedAt,
+            // NOTE: *FetchedAt timestamps are intentionally NOT persisted.
+            // They stay in-memory only so that on page reload / new tab,
+            // the app checks Firebase incrementally instead of using stale cached data.
         }),
     }
 ));
