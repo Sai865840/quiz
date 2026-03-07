@@ -1,6 +1,6 @@
 import {
     doc, collection, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
-    addDoc, query, orderBy, serverTimestamp, writeBatch,
+    addDoc, query, orderBy, where, serverTimestamp, writeBatch, Timestamp,
 } from 'firebase/firestore';
 import { db } from './config';
 
@@ -42,9 +42,13 @@ export async function addSubject(uid, data) {
     return docRef.id;
 }
 
-export async function getSubjects(uid) {
+export async function getSubjects(uid, afterTimestamp = null) {
     const ref = collection(db, 'users', uid, 'subjects');
-    const q = query(ref, orderBy('createdAt', 'desc'));
+    const constraints = [orderBy('updatedAt', 'desc')];
+    if (afterTimestamp) {
+        constraints.push(where('updatedAt', '>', Timestamp.fromDate(new Date(afterTimestamp))));
+    }
+    const q = query(ref, ...constraints);
     const snap = await getDocs(q);
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
@@ -75,9 +79,13 @@ export async function addChapter(uid, subjectId, data) {
     return docRef.id;
 }
 
-export async function getChapters(uid, subjectId) {
+export async function getChapters(uid, subjectId, afterTimestamp = null) {
     const ref = collection(db, 'users', uid, 'subjects', subjectId, 'chapters');
-    const q = query(ref, orderBy('createdAt', 'desc'));
+    const constraints = [orderBy('updatedAt', 'desc')];
+    if (afterTimestamp) {
+        constraints.push(where('updatedAt', '>', Timestamp.fromDate(new Date(afterTimestamp))));
+    }
+    const q = query(ref, ...constraints);
     const snap = await getDocs(q);
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
@@ -113,14 +121,20 @@ export async function addQuestions(uid, subjectId, chapterId, questions) {
             timesCorrect: 0,
             nextReviewDate: null,
             createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
         });
     });
 
     await batch.commit();
 }
 
-export async function getQuestions(uid, subjectId, chapterId) {
+export async function getQuestions(uid, subjectId, chapterId, afterTimestamp = null) {
     const ref = collection(db, 'users', uid, 'subjects', subjectId, 'chapters', chapterId, 'questions');
+    if (afterTimestamp) {
+        const q = query(ref, where('updatedAt', '>', Timestamp.fromDate(new Date(afterTimestamp))));
+        const snap = await getDocs(q);
+        return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    }
     const snap = await getDocs(ref);
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
@@ -128,7 +142,7 @@ export async function getQuestions(uid, subjectId, chapterId) {
 export async function updateQuestion(uid, subjectId, chapterId, questionId, data) {
     await updateDoc(
         doc(db, 'users', uid, 'subjects', subjectId, 'chapters', chapterId, 'questions', questionId),
-        { ...data }
+        { ...data, updatedAt: serverTimestamp() }
     );
 }
 

@@ -244,6 +244,30 @@ export { computeMasteryLevel };
 const SUMMARY_DOC_PATH = (uid) => doc(db, 'users', uid, 'performanceSummary', 'data');
 
 /**
+ * Reads performance data only if it has changed since lastSyncedAt.
+ * Returns { map, updatedAt } if changed, or null if unchanged.
+ * Cost: 1 Firestore read in all cases (we must read the doc to check updatedAt).
+ */
+export async function getPerformanceMapIfChanged(uid, lastSyncedAt) {
+    const summaryRef = SUMMARY_DOC_PATH(uid);
+    const summarySnap = await getDoc(summaryRef);
+
+    if (!summarySnap.exists()) return null;
+
+    const data = summarySnap.data();
+    const docUpdatedAt = data.updatedAt || null;
+
+    // If we have a lastSyncedAt and the doc hasn't been updated since, skip
+    if (lastSyncedAt && docUpdatedAt && new Date(docUpdatedAt).getTime() <= new Date(lastSyncedAt).getTime()) {
+        console.log('[Sync] Performance data unchanged, skipping.');
+        return null;
+    }
+
+    console.log('[Sync] Performance data changed, returning updated map.');
+    return { map: data.questions || {}, updatedAt: docUpdatedAt };
+}
+
+/**
  * Reads performance data for all questions in a single Firestore document read.
  * Returns a map: { [questionId]: performanceData }
  * Falls back to reading the old subcollection and migrates to summary doc if not found.

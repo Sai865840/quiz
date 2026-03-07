@@ -3,6 +3,16 @@ import { persist } from 'zustand/middleware';
 import * as firestoreService from '../firebase/firestoreService';
 import * as sessionService from '../firebase/sessionService';
 
+// Merge helper: combines existing array with incoming items by id
+function mergeById(existing, incoming) {
+    if (!incoming || incoming.length === 0) return existing;
+    const map = new Map((existing || []).map(item => [item.id, item]));
+    for (const item of incoming) {
+        map.set(item.id, item); // overwrite or insert
+    }
+    return Array.from(map.values());
+}
+
 // TTL constants
 const PERF_TTL_MS = 60 * 60 * 1000;    // 1 hour — performance summary doc
 const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour — last session + templates
@@ -19,6 +29,12 @@ export const useDataStore = create(persist((set, get) => ({
     performanceLoading: false,
     performanceFetchedAt: null,
 
+    // ─── Incremental sync timestamps ───
+    subjectsSyncedAt: null,
+    chaptersSyncedAt: {},       // { [subjectId]: timestamp }
+    questionsSyncedAt: {},      // { [chapterId]: timestamp }
+    performanceSyncedAt: null,
+
     // Lightweight data cached per-visit
     lastSession: null,        // most recent completed session
     sessionFetchedAt: null,
@@ -32,8 +48,21 @@ export const useDataStore = create(persist((set, get) => ({
     fetchSubjects: async (uid) => {
         set({ subjectsLoading: true });
         try {
-            const subjects = await firestoreService.getSubjects(uid);
-            set({ subjects, subjectsLoading: false });
+            const { subjectsSyncedAt, subjects: existing } = get();
+            const fetched = await firestoreService.getSubjects(uid, subjectsSyncedAt);
+            if (subjectsSyncedAt && fetched.length === 0) {
+                // Nothing new since last sync
+                console.log('[Sync] Subjects: no changes since last sync.');
+                set({ subjectsLoading: false });
+            } else if (subjectsSyncedAt) {
+                // Incremental merge
+                console.log(`[Sync] Subjects: merging ${fetched.length} updated items.`);
+                set({ subjects: mergeById(existing, fetched), subjectsLoading: false, subjectsSyncedAt: new Date().toISOString() });
+            } else {
+                // Full fetch (first time)
+                console.log(`[Sync] Subjects: full fetch, loaded ${fetched.length} items.`);
+                set({ subjects: fetched, subjectsLoading: false, subjectsSyncedAt: new Date().toISOString() });
+            }
         } catch (err) {
             console.error('Failed to fetch subjects:', err);
             set({ subjectsLoading: false });
@@ -63,11 +92,28 @@ export const useDataStore = create(persist((set, get) => ({
     fetchChapters: async (uid, subjectId) => {
         set({ chaptersLoading: true });
         try {
-            const chapters = await firestoreService.getChapters(uid, subjectId);
-            set((state) => ({
-                chapters: { ...state.chapters, [subjectId]: chapters },
-                chaptersLoading: false,
-            }));
+            const { chaptersSyncedAt, chapters: existingMap } = get();
+            const lastSynced = chaptersSyncedAt[subjectId] || null;
+            const fetched = await firestoreService.getChapters(uid, subjectId, lastSynced);
+
+            if (lastSynced && fetched.length === 0) {
+                console.log(`[Sync] Chapters(${subjectId}): no changes since last sync.`);
+                set({ chaptersLoading: false });
+            } else if (lastSynced) {
+                console.log(`[Sync] Chapters(${subjectId}): merging ${fetched.length} updated items.`);
+                set((state) => ({
+                    chapters: { ...state.chapters, [subjectId]: mergeById(state.chapters[subjectId] || [], fetched) },
+                    chaptersSyncedAt: { ...state.chaptersSyncedAt, [subjectId]: new Date().toISOString() },
+                    chaptersLoading: false,
+                }));
+            } else {
+                console.log(`[Sync] Chapters(${subjectId}): full fetch, loaded ${fetched.length} items.`);
+                set((state) => ({
+                    chapters: { ...state.chapters, [subjectId]: fetched },
+                    chaptersSyncedAt: { ...state.chaptersSyncedAt, [subjectId]: new Date().toISOString() },
+                    chaptersLoading: false,
+                }));
+            }
         } catch (err) {
             console.error('Failed to fetch chapters:', err);
             set({ chaptersLoading: false });
@@ -90,11 +136,28 @@ export const useDataStore = create(persist((set, get) => ({
     fetchQuestions: async (uid, subjectId, chapterId) => {
         set({ questionsLoading: true });
         try {
-            const questions = await firestoreService.getQuestions(uid, subjectId, chapterId);
-            set((state) => ({
-                questions: { ...state.questions, [chapterId]: questions },
-                questionsLoading: false,
-            }));
+            const { questionsSyncedAt, questions: existingMap } = get();
+            const lastSynced = questionsSyncedAt[chapterId] || null;
+            const fetched = await firestoreService.getQuestions(uid, subjectId, chapterId, lastSynced);
+
+            if (lastSynced && fetched.length === 0) {
+                console.log(`[Sync] Questions(${chapterId}): no changes since last sync.`);
+                set({ questionsLoading: false });
+            } else if (lastSynced) {
+                console.log(`[Sync] Questions(${chapterId}): merging ${fetched.length} updated items.`);
+                set((state) => ({
+                    questions: { ...state.questions, [chapterId]: mergeById(state.questions[chapterId] || [], fetched) },
+                    questionsSyncedAt: { ...state.questionsSyncedAt, [chapterId]: new Date().toISOString() },
+                    questionsLoading: false,
+                }));
+            } else {
+                console.log(`[Sync] Questions(${chapterId}): full fetch, loaded ${fetched.length} items.`);
+                set((state) => ({
+                    questions: { ...state.questions, [chapterId]: fetched },
+                    questionsSyncedAt: { ...state.questionsSyncedAt, [chapterId]: new Date().toISOString() },
+                    questionsLoading: false,
+                }));
+            }
         } catch (err) {
             console.error('Failed to fetch questions:', err);
             set({ questionsLoading: false });
@@ -136,7 +199,7 @@ export const useDataStore = create(persist((set, get) => ({
     // All pages should read from store.performanceMap instead of calling Firebase directly.
 
     fetchPerformance: async (uid, { force = false } = {}) => {
-        const { performanceFetchedAt, performanceLoading } = get();
+        const { performanceFetchedAt, performanceLoading, performanceSyncedAt } = get();
 
         // Skip if already loading
         if (performanceLoading) return get().performanceMap;
@@ -149,8 +212,32 @@ export const useDataStore = create(persist((set, get) => ({
 
         set({ performanceLoading: true });
         try {
+            // Try incremental check first (still costs 1 read but avoids re-processing if unchanged)
+            if (!force && performanceSyncedAt) {
+                const result = await sessionService.getPerformanceMapIfChanged(uid, performanceSyncedAt);
+                if (result === null) {
+                    // Data unchanged since last sync
+                    set({ performanceLoading: false, performanceFetchedAt: Date.now() });
+                    return get().performanceMap;
+                }
+                // Data changed — use the fresh map
+                set({
+                    performanceMap: result.map,
+                    performanceLoading: false,
+                    performanceFetchedAt: Date.now(),
+                    performanceSyncedAt: result.updatedAt,
+                });
+                return result.map;
+            }
+
+            // Full fetch (first time or forced)
             const perf = await sessionService.getPerformanceMap(uid);
-            set({ performanceMap: perf, performanceLoading: false, performanceFetchedAt: Date.now() });
+            set({
+                performanceMap: perf,
+                performanceLoading: false,
+                performanceFetchedAt: Date.now(),
+                performanceSyncedAt: new Date().toISOString(),
+            });
             return perf;
         } catch (err) {
             console.error('Failed to fetch performance:', err);
@@ -162,7 +249,7 @@ export const useDataStore = create(persist((set, get) => ({
     // Called after a session ends to update the in-memory map without a re-fetch
     updatePerformanceMap: (updatedMap) => {
         if (updatedMap && Object.keys(updatedMap).length > 0) {
-            set({ performanceMap: updatedMap, performanceFetchedAt: Date.now() });
+            set({ performanceMap: updatedMap, performanceFetchedAt: Date.now(), performanceSyncedAt: new Date().toISOString() });
         }
     },
 
@@ -228,6 +315,11 @@ export const useDataStore = create(persist((set, get) => ({
             sessionFetchedAt: null,
             templatesFetchedAt: null,
             profileFetchedAt: null,
+            // Reset all incremental sync timestamps for full re-fetch
+            subjectsSyncedAt: null,
+            chaptersSyncedAt: {},
+            questionsSyncedAt: {},
+            performanceSyncedAt: null,
         });
         try {
             // Re-fetch everything from Firebase
@@ -249,18 +341,30 @@ export const useDataStore = create(persist((set, get) => ({
             }
 
             // Re-fetch chapters & questions for all subjects
+            const nowIso = new Date().toISOString();
+            const newChaptersSyncedAt = {};
+            const newQuestionsSyncedAt = {};
             for (const sub of subjects) {
                 const chapters = await firestoreService.getChapters(uid, sub.id);
                 set((state) => ({
                     chapters: { ...state.chapters, [sub.id]: chapters },
                 }));
+                newChaptersSyncedAt[sub.id] = nowIso;
                 for (const ch of chapters) {
                     const questions = await firestoreService.getQuestions(uid, sub.id, ch.id);
                     set((state) => ({
                         questions: { ...state.questions, [ch.id]: questions },
                     }));
+                    newQuestionsSyncedAt[ch.id] = nowIso;
                 }
             }
+            // Restore sync timestamps so future fetches use incremental sync
+            set({
+                subjectsSyncedAt: nowIso,
+                chaptersSyncedAt: newChaptersSyncedAt,
+                questionsSyncedAt: newQuestionsSyncedAt,
+                performanceSyncedAt: nowIso,
+            });
         } catch (err) {
             console.error('Force refresh failed:', err);
             throw err; // let caller handle UI
@@ -281,6 +385,10 @@ export const useDataStore = create(persist((set, get) => ({
         templatesFetchedAt: null,
         userProfile: null,
         profileFetchedAt: null,
+        subjectsSyncedAt: null,
+        chaptersSyncedAt: {},
+        questionsSyncedAt: {},
+        performanceSyncedAt: null,
     }),
 }),
     {
@@ -297,6 +405,11 @@ export const useDataStore = create(persist((set, get) => ({
             templatesFetchedAt: state.templatesFetchedAt,
             userProfile: state.userProfile,
             profileFetchedAt: state.profileFetchedAt,
+            // Incremental sync timestamps
+            subjectsSyncedAt: state.subjectsSyncedAt,
+            chaptersSyncedAt: state.chaptersSyncedAt,
+            questionsSyncedAt: state.questionsSyncedAt,
+            performanceSyncedAt: state.performanceSyncedAt,
         }),
     }
 ));
