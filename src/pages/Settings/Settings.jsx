@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
+import { useDataStore } from '../../store/dataStore';
 import { useUIStore } from '../../store/uiStore';
 import { logoutUser } from '../../firebase/authService';
 import { updateUserProfile } from '../../firebase/firestoreService';
@@ -8,6 +9,7 @@ import { updateUserProfile } from '../../firebase/firestoreService';
 export default function Settings() {
     const navigate = useNavigate();
     const { user, userProfile, setUserProfile, logout } = useAuthStore();
+    const { forceRefreshAll } = useDataStore();
     const { accentColor, setAccentColor, fontSize, setFontSize, addToast } = useUIStore();
 
     const [examName, setExamName] = useState('');
@@ -15,6 +17,7 @@ export default function Settings() {
     const [dailyGoal, setDailyGoal] = useState(50);
     const [savingProfile, setSavingProfile] = useState(false);
     const [loggingOut, setLoggingOut] = useState(false);
+    const [syncing, setSyncing] = useState(false);
 
     // Load profile data
     useEffect(() => {
@@ -38,6 +41,20 @@ export default function Settings() {
             addToast({ type: 'error', message: 'Failed to save settings' });
         } finally {
             setSavingProfile(false);
+        }
+    };
+
+    const handleSyncData = async () => {
+        if (!user?.uid || syncing) return;
+        setSyncing(true);
+        try {
+            await forceRefreshAll(user.uid);
+            addToast({ type: 'success', message: 'All data synced from Firebase!' });
+        } catch (err) {
+            console.error('Sync failed:', err);
+            addToast({ type: 'error', message: 'Sync failed. Please try again.' });
+        } finally {
+            setSyncing(false);
         }
     };
 
@@ -165,11 +182,29 @@ export default function Settings() {
                     Data Management
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                    <button
+                        className="np-btn np-btn-primary np-btn-sm"
+                        onClick={handleSyncData}
+                        disabled={syncing}
+                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                    >
+                        {syncing ? (
+                            <>
+                                <div className="np-auth-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+                                Syncing...
+                            </>
+                        ) : (
+                            '🔄 Sync from Firebase'
+                        )}
+                    </button>
                     <button className="np-btn np-btn-outline np-btn-sm">📥 Export Questions</button>
                     <button className="np-btn np-btn-outline np-btn-sm">📊 Export Sessions</button>
                     <button className="np-btn np-btn-outline np-btn-sm">📤 Import CSV</button>
                     <button className="np-btn np-btn-danger np-btn-sm">🗑️ Clear Performance Data</button>
                 </div>
+                <p style={{ fontSize: '0.72rem', color: 'var(--muted)', marginTop: 8 }}>
+                    Data is cached locally for 1 hour. Use sync to force a fresh pull from Firebase.
+                </p>
             </div>
 
             {/* Sign Out */}

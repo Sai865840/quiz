@@ -114,25 +114,35 @@ export default function TestSession() {
         setStarting(true);
 
         try {
-            // Build question list based on mode (uses in-memory performanceMap from store)
+            // Always read latest performanceMap from store (not the stale React closure)
+            let perfMap = useDataStore.getState().performanceMap;
+
+            // For modes that depend on performance data, ensure it's loaded
+            if (['due_today', 'wrong', 'smart', 'unseen', 'flagged'].includes(selectedMode)) {
+                if (!perfMap || Object.keys(perfMap).length === 0) {
+                    perfMap = await fetchPerformance(user.uid, { force: true }) || {};
+                }
+            }
+
+            // Build question list based on mode
             let selected = [];
             const count = Math.min(finalCount, availableCount);
 
             switch (selectedMode) {
                 case 'smart':
-                    selected = buildSmartSession(allQuestions, performanceMap, count);
+                    selected = buildSmartSession(allQuestions, perfMap, count);
                     break;
                 case 'wrong':
-                    selected = buildWrongQuestions(allQuestions, performanceMap).slice(0, count);
+                    selected = buildWrongQuestions(allQuestions, perfMap).slice(0, count);
                     break;
                 case 'due_today':
-                    selected = buildDueToday(allQuestions, performanceMap).slice(0, count);
+                    selected = buildDueToday(allQuestions, perfMap).slice(0, count);
                     break;
                 case 'unseen':
-                    selected = buildUnseenFirst(allQuestions, performanceMap, count).slice(0, count);
+                    selected = buildUnseenFirst(allQuestions, perfMap, count).slice(0, count);
                     break;
                 case 'flagged':
-                    selected = buildFlaggedOnly(allQuestions, performanceMap).slice(0, count);
+                    selected = buildFlaggedOnly(allQuestions, perfMap).slice(0, count);
                     break;
                 case 'random':
                 default:

@@ -1,13 +1,14 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import * as firestoreService from '../firebase/firestoreService';
 import * as sessionService from '../firebase/sessionService';
 
 // TTL constants
-const PERF_TTL_MS = 5 * 60 * 1000;    // 5 min — performance summary doc
-const SESSION_TTL_MS = 5 * 60 * 1000; // 5 min — last session + templates
-const PROFILE_TTL_MS = 10 * 60 * 1000; // 10 min — user profile
+const PERF_TTL_MS = 60 * 60 * 1000;    // 1 hour — performance summary doc
+const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour — last session + templates
+const PROFILE_TTL_MS = 60 * 60 * 1000; // 1 hour — user profile
 
-export const useDataStore = create((set, get) => ({
+export const useDataStore = create(persist((set, get) => ({
     subjects: [],
     subjectsLoading: false,
     chapters: {},
@@ -115,6 +116,19 @@ export const useDataStore = create((set, get) => ({
         }));
     },
 
+    updateQuestion: async (uid, subjectId, chapterId, questionId, data) => {
+        await firestoreService.updateQuestion(uid, subjectId, chapterId, questionId, data);
+        // Optimistically update the in-memory cache
+        set((state) => ({
+            questions: {
+                ...state.questions,
+                [chapterId]: (state.questions[chapterId] || []).map((q) =>
+                    q.id === questionId ? { ...q, ...data } : q
+                ),
+            },
+        }));
+    },
+
     // ─── Performance ───
     //
     // Uses a summary document (1 Firestore read for ALL question performance data).
@@ -205,6 +219,54 @@ export const useDataStore = create((set, get) => ({
         }
     },
 
+    // ─── Force Sync (manual refresh from Settings) ───
+
+    forceRefreshAll: async (uid) => {
+        if (!uid) return;
+        set({
+            performanceFetchedAt: null,
+            sessionFetchedAt: null,
+            templatesFetchedAt: null,
+            profileFetchedAt: null,
+        });
+        try {
+            // Re-fetch everything from Firebase
+            const [subjects, perf, profile] = await Promise.all([
+                firestoreService.getSubjects(uid),
+                sessionService.getPerformanceMap(uid),
+                firestoreService.getUserProfile(uid),
+            ]);
+            set({
+                subjects,
+                performanceMap: perf,
+                performanceFetchedAt: Date.now(),
+                profileFetchedAt: Date.now(),
+            });
+            if (profile) {
+                set({ userProfile: profile });
+                const { useAuthStore } = await import('./authStore');
+                useAuthStore.getState().setUserProfile(profile);
+            }
+
+            // Re-fetch chapters & questions for all subjects
+            for (const sub of subjects) {
+                const chapters = await firestoreService.getChapters(uid, sub.id);
+                set((state) => ({
+                    chapters: { ...state.chapters, [sub.id]: chapters },
+                }));
+                for (const ch of chapters) {
+                    const questions = await firestoreService.getQuestions(uid, sub.id, ch.id);
+                    set((state) => ({
+                        questions: { ...state.questions, [ch.id]: questions },
+                    }));
+                }
+            }
+        } catch (err) {
+            console.error('Force refresh failed:', err);
+            throw err; // let caller handle UI
+        }
+    },
+
     // ─── Reset ───
 
     clearData: () => set({
@@ -220,4 +282,21 @@ export const useDataStore = create((set, get) => ({
         userProfile: null,
         profileFetchedAt: null,
     }),
-}));
+}),
+    {
+        name: 'np-data-store',
+        partialize: (state) => ({
+            subjects: state.subjects,
+            chapters: state.chapters,
+            questions: state.questions,
+            performanceMap: state.performanceMap,
+            performanceFetchedAt: state.performanceFetchedAt,
+            lastSession: state.lastSession,
+            sessionFetchedAt: state.sessionFetchedAt,
+            templates: state.templates,
+            templatesFetchedAt: state.templatesFetchedAt,
+            userProfile: state.userProfile,
+            profileFetchedAt: state.profileFetchedAt,
+        }),
+    }
+));

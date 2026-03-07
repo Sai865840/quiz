@@ -12,7 +12,7 @@ export default function SubjectDetail() {
     const {
         subjects, fetchSubjects,
         chapters, chaptersLoading, fetchChapters, addChapter, deleteChapter,
-        questions, questionsLoading, fetchQuestions, addQuestions, deleteQuestion,
+        questions, questionsLoading, fetchQuestions, addQuestions, deleteQuestion, updateQuestion,
     } = useDataStore();
 
     const [expandedChapter, setExpandedChapter] = useState(null);
@@ -25,6 +25,7 @@ export default function SubjectDetail() {
     // Question form
     const [showQuestionModal, setShowQuestionModal] = useState(false);
     const [questionChapterId, setQuestionChapterId] = useState(null);
+    const [editingQuestionId, setEditingQuestionId] = useState(null); // null = add mode, id = edit mode
     const [qText, setQText] = useState('');
     const [qOptA, setQOptA] = useState('');
     const [qOptB, setQOptB] = useState('');
@@ -95,17 +96,33 @@ export default function SubjectDetail() {
 
     const openQuestionModal = (chapterId) => {
         setQuestionChapterId(chapterId);
+        setEditingQuestionId(null);
         setQText(''); setQOptA(''); setQOptB(''); setQOptC(''); setQOptD('');
         setQCorrect('A'); setQExplanation(''); setQImportant(false);
         setShowQuestionModal(true);
     };
 
-    const handleAddQuestion = async () => {
+    const openEditModal = (chapterId, question) => {
+        setQuestionChapterId(chapterId);
+        setEditingQuestionId(question.id);
+        setQText(question.text || '');
+        const opts = question.options || [];
+        setQOptA(opts.find(o => o.label === 'A')?.text || '');
+        setQOptB(opts.find(o => o.label === 'B')?.text || '');
+        setQOptC(opts.find(o => o.label === 'C')?.text || '');
+        setQOptD(opts.find(o => o.label === 'D')?.text || '');
+        setQCorrect(question.correctOption || 'A');
+        setQExplanation(question.explanation || '');
+        setQImportant(question.important || false);
+        setShowQuestionModal(true);
+    };
+
+    const handleSaveQuestion = async () => {
         if (!qText.trim() || !qOptA.trim() || !qOptB.trim() || !qOptC.trim() || !qOptD.trim()) return;
         if (!user?.uid || !questionChapterId) return;
         setSavingQuestion(true);
         try {
-            await addQuestions(user.uid, subjectId, questionChapterId, [{
+            const questionData = {
                 text: qText.trim(),
                 options: [
                     { label: 'A', text: qOptA.trim() },
@@ -116,10 +133,15 @@ export default function SubjectDetail() {
                 correctOption: qCorrect,
                 explanation: qExplanation.trim(),
                 important: qImportant,
-            }]);
+            };
+            if (editingQuestionId) {
+                await updateQuestion(user.uid, subjectId, questionChapterId, editingQuestionId, questionData);
+            } else {
+                await addQuestions(user.uid, subjectId, questionChapterId, [questionData]);
+            }
             setShowQuestionModal(false);
         } catch (err) {
-            console.error('Failed to add question:', err);
+            console.error('Failed to save question:', err);
         } finally {
             setSavingQuestion(false);
         }
@@ -364,11 +386,18 @@ export default function SubjectDetail() {
                                                                         ⭐ Important
                                                                     </span>
                                                                 )}
-                                                                <button className="np-icon-btn np-icon-btn-danger" title="Delete Question" onClick={() => setDeleteQuestionConfirm(q.id)}>
-                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                                                        <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                                                                    </svg>
-                                                                </button>
+                                                                <div style={{ display: 'flex', gap: 2 }}>
+                                                                    <button className="np-icon-btn" title="Edit Question" onClick={() => openEditModal(chapter.id, q)}>
+                                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                            <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                                                        </svg>
+                                                                    </button>
+                                                                    <button className="np-icon-btn np-icon-btn-danger" title="Delete Question" onClick={() => setDeleteQuestionConfirm(q.id)}>
+                                                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                                                            <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                                                                        </svg>
+                                                                    </button>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
@@ -400,7 +429,7 @@ export default function SubjectDetail() {
             </Modal>
 
             {/* ─── Add Question Modal ─── */}
-            <Modal isOpen={showQuestionModal} onClose={() => setShowQuestionModal(false)} title="Add Question" size="lg">
+            <Modal isOpen={showQuestionModal} onClose={() => setShowQuestionModal(false)} title={editingQuestionId ? 'Edit Question' : 'Add Question'} size="lg">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div>
                         <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--muted)', marginBottom: 6, fontWeight: 500 }}>Question</label>
@@ -464,8 +493,8 @@ export default function SubjectDetail() {
                     </div>
                     <div style={{ display: 'flex', gap: 12, justifyContent: 'flex-end' }}>
                         <button className="np-btn np-btn-outline np-btn-md" onClick={() => setShowQuestionModal(false)}>Cancel</button>
-                        <button className="np-btn np-btn-primary np-btn-md" onClick={handleAddQuestion} disabled={savingQuestion || !qText.trim() || !qOptA.trim() || !qOptB.trim() || !qOptC.trim() || !qOptD.trim()}>
-                            {savingQuestion ? 'Adding...' : 'Add Question'}
+                        <button className="np-btn np-btn-primary np-btn-md" onClick={handleSaveQuestion} disabled={savingQuestion || !qText.trim() || !qOptA.trim() || !qOptB.trim() || !qOptC.trim() || !qOptD.trim()}>
+                            {savingQuestion ? 'Saving...' : (editingQuestionId ? 'Save Changes' : 'Add Question')}
                         </button>
                     </div>
                 </div>
